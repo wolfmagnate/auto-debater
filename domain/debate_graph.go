@@ -137,10 +137,44 @@ func (dg *DebateGraph) AddEdge(edge *DebateGraphEdge) error {
 	return nil
 }
 
+func (dg *DebateGraph) RemoveEdge(causeArgument, effectArgument string) error {
+	edgeKey := generateEdgeKey(causeArgument, effectArgument)
+	edge, exists := dg.edgeMap[edgeKey]
+	if !exists {
+		return fmt.Errorf("削除対象のエッジ '%s' がグラフ内に見つかりません", edgeKey)
+	}
+
+	// 1. edgeMapからエッジを削除します。
+	delete(dg.edgeMap, edgeKey)
+
+	// 2. EffectノードのCausesスライスから該当するエッジを削除します。
+	//    スライスをループ処理し、削除対象以外の要素で新しいスライスを構築し直します。
+	effectNode := edge.Effect
+	newCauses := make([]*DebateGraphEdge, 0, len(effectNode.Causes)-1)
+	for _, e := range effectNode.Causes {
+		// ポインタを比較して、削除対象のエッジと同一でないものだけを新しいスライスに追加します。
+		if e != edge {
+			newCauses = append(newCauses, e)
+		}
+	}
+	// EffectノードのCausesスライスを、更新された新しいスライスで上書きします。
+	effectNode.Causes = newCauses
+
+	return nil
+}
+
 func (dg *DebateGraph) GetEdge(causeArgument string, effectArgument string) (*DebateGraphEdge, bool) {
 	edgeKey := generateEdgeKey(causeArgument, effectArgument)
 	edge, exists := dg.edgeMap[edgeKey]
 	return edge, exists
+}
+
+func (dg *DebateGraph) GetAllEdges() []*DebateGraphEdge {
+	edges := make([]*DebateGraphEdge, 0, len(dg.edgeMap))
+	for _, edge := range dg.edgeMap {
+		edges = append(edges, edge)
+	}
+	return edges
 }
 
 func (dg *DebateGraph) DisplayGraph() {
@@ -223,6 +257,28 @@ type jsonNode struct {
 	UniquenessRebuttals []string `json:"uniqueness_rebuttals,omitempty"`
 }
 
+func (n *DebateGraphNode) ToJSON() (string, error) {
+	if n == nil {
+		return "", fmt.Errorf("cannot convert nil DebateGraphNode to JSON")
+	}
+
+	jNode := &jsonNode{
+		Argument:            n.Argument,
+		IsRebuttal:          n.IsRebuttal,
+		Importance:          n.Importance,
+		Uniqueness:          n.Uniqueness,
+		ImportanceRebuttals: n.ImportanceRebuttals,
+		UniquenessRebuttals: n.UniquenessRebuttals,
+	}
+
+	jsonData, err := json.MarshalIndent(jNode, "", "    ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal DebateGraphNode to JSON: %w", err)
+	}
+
+	return string(jsonData), nil
+}
+
 type jsonEdge struct {
 	Cause               string   `json:"cause"`
 	Effect              string   `json:"effect"`
@@ -244,6 +300,32 @@ type jsonEdgeRebuttal struct {
 	TargetEffectArgument string `json:"target_effect_argument"`
 	RebuttalType         string `json:"rebuttal_type"`
 	RebuttalArgument     string `json:"rebuttal_argument"`
+}
+
+func (e *DebateGraphEdge) ToJSON() (string, error) {
+	if e == nil {
+		return "", fmt.Errorf("cannot convert nil DebateGraphEdge to JSON")
+	}
+	if e.Cause == nil || e.Effect == nil {
+		return "", fmt.Errorf("cannot marshal edge with nil cause or effect")
+	}
+
+	jEdge := &jsonEdge{
+		Cause:               e.Cause.Argument,
+		Effect:              e.Effect.Argument,
+		IsRebuttal:          e.IsRebuttal,
+		Certainty:           e.Certainty,
+		Uniqueness:          e.Uniqueness,
+		CertaintyRebuttal:   e.CertaintyRebuttal,
+		UniquenessRebuttals: e.UniquenessRebuttals,
+	}
+
+	jsonData, err := json.MarshalIndent(jEdge, "", "    ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal DebateGraphEdge to JSON: %w", err)
+	}
+
+	return string(jsonData), nil
 }
 
 type jsonCounterArgumentRebuttal struct {

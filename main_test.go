@@ -1,65 +1,219 @@
 package main
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/joho/godotenv"
-	"github.com/wolfmagnate/auto_debater/domain"
-	"github.com/wolfmagnate/auto_debater/rebuttal_analyzer"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	createrebuttal "github.com/wolfmagnate/auto_debater/create_rebuttal"
+	"github.com/wolfmagnate/auto_debater/handler"
+	"github.com/wolfmagnate/auto_debater/logic_composer"
 )
 
-func TestMain(t *testing.T) {
-	// カレントディレクトリの".env"を読み込んで環境変数に設定するコードを書いてください
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		t.Fatalf("Error loading .env file: %v", err)
+// findProjectRootは、go:embedで埋め込まれたファイルをテストで正しく読み込むために、
+// 'go.mod'ファイルを目印にプロジェクトのルートディレクトリを探します。
+func findProjectRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-
-	main()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", os.ErrNotExist
+		}
+		dir = parent
+	}
 }
 
-func TestRebuttal(t *testing.T) {
-	// output.jsonから読み取りdomain.NewDebateGraphFromJSONを利用する
+// TestEnhanceLogicEndpoint_Integration は、/api/enhance-logicエンドポイントの統合テストです。
+// 注意: このテストは実際にAIモデルへのAPI呼び出しを行う可能性があります。
+// CI/CD環境で実行する場合は、infra.ChatCompletionHandlerをモックに差し替えることを推奨します。
+func TestEnhanceLogicEndpoint_Integration(t *testing.T) {
+	// --- 1. テストの準備 ---
+
+	// dotenvを読み込む
 	if err := godotenv.Load(); err != nil {
-		t.Fatalf("Error loading .env file: %v", err)
+		log.Fatal("Error loading .env file")
 	}
 
-	// Read the debate graph from output.json
-	jsonBytes, err := os.ReadFile("output.json")
+	// go:embedが正しく機能するように、カレントディレクトリをプロジェクトルートに設定
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	projectRoot, err := findProjectRoot()
+	require.NoError(t, err, "go.modファイルが見つかりません。プロジェクトのルートでテストを実行してください。")
+	require.NoError(t, os.Chdir(projectRoot))
+	defer os.Chdir(originalWD) // テスト終了時にカレントディレクトリを元に戻す
+
+	// 依存関係を初期化
+	rebuttalCreator, err := createrebuttal.NewRebuttalCreator()
 	if err != nil {
-		t.Fatalf("Failed to read output.json: %v", err)
+		log.Fatalf("FATAL: Failed to create rebuttal creator: %v", err)
 	}
 
-	debateGraph, err := domain.NewDebateGraphFromJSON(string(jsonBytes))
+	logicEnhancer, err := logic_composer.CreateLogicEnhancer()
 	if err != nil {
-		t.Fatalf("Failed to create DebateGraph from JSON: %v", err)
+		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
 	}
 
-	rebuttalAnalyzer, err := rebuttal_analyzer.CreateRebuttalAnalyzer()
+	// テスト対象のハンドラとテストサーバーをセットアップ
+	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer)
+	testServer := httptest.NewServer(http.HandlerFunc(apiHandler.EnhanceLogicEndpoint))
+	defer testServer.Close()
+
+	// --- 2. リクエストの準備と実行 ---
+
+	// テスト用のリクエストボディを定義
+	requestJSON := `{
+		"debate_graph": {
+			"nodes": [
+				{ "argument": "再生可能エネルギーの導入が増加する", "is_rebuttal": false },
+				{ "argument": "CO2排出量が削減される", "is_rebuttal": false },
+				{ "argument": "地球温暖化の進行が緩和される", "is_rebuttal": false }
+			],
+			"edges": [
+				{ "cause": "再生可能エネルギーの導入が増加する", "effect": "CO2排出量が削減される", "is_rebuttal": false },
+				{ "cause": "CO2排出量が削減される", "effect": "地球温暖化の進行が緩和される", "is_rebuttal": false }
+			]
+		},
+		"cause": "再生可能エネルギーの導入が増加する",
+		"effect": "CO2排出量が削減される"
+	}`
+
+	// APIにPOSTリクエストを送信
+	res, err := http.Post(testServer.URL, "application/json", bytes.NewBufferString(requestJSON))
+	require.NoError(t, err, "HTTPリクエストの送信に失敗しました。")
+	defer res.Body.Close()
+
+	// --- 3. レスポンスの検証 ---
+
+	// ステータスコードを検証
+	assert.Equal(t, http.StatusOK, res.StatusCode, "期待されるHTTPステータスコードは200 OKです。")
+
+	// Content-Typeヘッダーを検証
+	assert.Equal(t, "application/json; charset=utf-8", res.Header.Get("Content-Type"), "Content-Typeヘッダーが正しくありません。")
+
+	// レスポンスボディをデコード
+	responseBodyBytes, err := io.ReadAll(res.Body)
+	require.NoError(t, err, "レスポンスボディの読み込みに失敗しました。")
+
+	log.Printf("Raw JSON Response Body:\n%s", string(responseBodyBytes))
+
+	var enhancementActions []logic_composer.EnhancementAction
+	err = json.Unmarshal(responseBodyBytes, &enhancementActions)
+	require.NoError(t, err, "レスポンスボディのJSONデコードに失敗しました。")
+
+	// AIの応答は非決定的だが、基本的な構造は検証可能
+	assert.NotEmpty(t, enhancementActions, "レスポンスの配列が空であってはいけません。")
+	t.Logf("AIから %d 件のロジック強化アクションが提案されました。", len(enhancementActions))
+
+	// 各アクションが期待される構造を持っているか検証
+	for i, action := range enhancementActions {
+		isValidAction := action.InsertNode != nil || action.StrengthenEdge != nil
+		assert.True(t, isValidAction, "インデックス %d のアクションに有効なペイロードが含まれていません。", i)
+
+		// 内容をログに出力して確認
+		if action.InsertNode != nil {
+			log.Printf("  - アクション %d: [ノード挿入] 中間ノード: '%s'", i, action.InsertNode.IntermediateArgument)
+		} else if action.StrengthenEdge != nil {
+			log.Printf("  - アクション %d: [エッジ強化] 種類: %s, 内容: '%s'", i, action.StrengthenEdge.EnhancementType, action.StrengthenEdge.Content)
+		}
+	}
+}
+
+func TestCreateRebuttalEndpoint_Integration(t *testing.T) {
+	// --- 1. テストの準備 ---
+
+	// dotenvを読み込む
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// go:embedが正しく機能するように、カレントディレクトリをプロジェクトルートに設定
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	projectRoot, err := findProjectRoot()
+	require.NoError(t, err, "go.modファイルが見つかりません。プロジェクトのルートでテストを実行してください。")
+	require.NoError(t, os.Chdir(projectRoot))
+	defer os.Chdir(originalWD) // テスト終了時にカレントディレクトリを元に戻す
+
+	// 依存関係を初期化
+	rebuttalCreator, err := createrebuttal.NewRebuttalCreator()
 	if err != nil {
-		t.Fatalf("Failed to create RebuttalAnalyzer: %v", err)
+		log.Fatalf("FATAL: Failed to create rebuttal creator: %v", err)
 	}
 
-	rebuttal := `
-反対側の主張は、国政選挙におけるインターネット投票導入に反対し、現行の投票所方式を維持すべきだという立場を強固に論証するものです。しかし、その主張は、現行制度が抱える課題から目を背け、テクノロジーの可能性を過小評価していると言わざるを得ません。以下に、その論理構造に対する反論を述べます。
-
-第一に、現行制度が「民主主義の信頼性と公正性を維持」してきたという主張は、深刻化する投票率の低下という現実を前に、その正当性が揺らいでいます。特に若年層や働き世代の投票率の低さは、もはや看過できないレベルに達しており、一部の世代や層の声だけが過剰に政治に反映される「サイレントマジョリティ」の増大を招いています。これは、民主主義の根幹である民意の正確な反映という観点から、信頼性・公正性が損なわれている状況と言えます。インターネット投票は、物理的・時間的な制約から投票を諦めていた人々の参加を促し、この歪みを是正する極めて有効な手段です。
-
-第二に、「サイバー攻撃のリスク」や「個人情報漏洩のリスク」を絶対的な障壁と見なすのは、技術の進歩を無視した議論です。現代社会では、金融取引や重要な行政手続きの多くが、既に高度なセキュリティ対策のもとでオンライン化されています。選挙システムも同様に、ブロックチェーン技術やマイナンバーカードと連携した厳格な多要素認証などを活用することで、不正アクセスやなりすましを防ぎ、データの秘匿性と正確性を担保することは十分に可能です。エストニアをはじめとする電子投票先進国の事例は、適切な技術的・制度的設計により、リスクは管理可能であることを示唆しています。リスクをゼロにすることに固執し、変化を拒むことは、より多くの民意を汲み取るという民主主義の発展機会を逸することに繋がります。
-
-第三に、「高齢者や情報弱者の投票機会が失われる」という懸念は重要ですが、それはインターネット投票を導入しない理由にはなりません。むしろ、社会全体のデジタル化を推進する中で、誰一人取り残さないためのサポート体制を構築する好機と捉えるべきです。導入に際しては、現行の投票所方式と併用し、有権者が選択できる環境を整えるべきです。公共施設での操作サポート窓口の設置や、移動式のデジタル投票支援など、多様な選択肢を用意することで、デジタル格差の問題は克服可能です。
-
-最後に、「投票所へ足を運ぶ行為が選挙への意識を高める」という主張は、多分に情緒的であり、その効果は限定的です。選挙への意識は、日々の生活の中で政治の重要性を実感し、政策情報を得て自ら考えるプロセスを通じて醸成されるものです。インターネット投票の導入は、オンラインでの政策議論の活発化や、候補者情報へのアクセシビリティ向上を促し、より本質的な政治参加意識の涵養に貢献する可能性を秘めています。
-
-結論として、現行制度の維持は、民主主義の停滞を容認することに他なりません。リスクを適切に管理し、テクノロジーの恩恵を最大限に活用することで、より多くの国民が参加し、多様な民意が反映される、より成熟した民主主義を実現するために、国政選挙へのインターネット投票導入に向けた前向きな議論を始めるべきです。
-`
-
-	err = rebuttalAnalyzer.AnalyzeRebuttal(context.Background(), debateGraph, rebuttal)
+	logicEnhancer, err := logic_composer.CreateLogicEnhancer()
 	if err != nil {
-		t.Fatalf("反論の分析に失敗しました: %v", err)
+		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
 	}
 
-	// 分析後のグラフを
+	// テスト対象のハンドラとテストサーバーをセットアップ
+	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer)
+	testServer := httptest.NewServer(http.HandlerFunc(apiHandler.CreateRebuttalEndpoint))
+	defer testServer.Close()
+
+	// --- 2. リクエストの準備と実行 ---
+
+	// テスト用のリクエストボディ(初期グラフ)を定義
+	requestJSON := `{
+		"nodes": [
+			{ "argument": "多くの小規模飲食店は、専門知識や時間不足から効果的なオンライン集客ができていない", "is_rebuttal": false },
+			{ "argument": "潜在顧客にリーチできず、機会損失が発生している", "is_rebuttal": false },
+			{ "argument": "AIが店舗情報から自動でWebサイトやSNS投稿を生成するSaaSを提供する", "is_rebuttal": false },
+			{ "argument": "オーナーは本来の調理・接客業務に集中できる", "is_rebuttal": false },
+			{ "argument": "オンラインでの認知度が向上し、新規顧客の来店が増加する", "is_rebuttal": false }
+		],
+		"edges": [
+			{
+				"cause": "多くの小規模飲食店は、専門知識や時間不足から効果的なオンライン集客ができていない",
+				"effect": "潜在顧客にリーチできず、機会損失が発生している",
+				"is_rebuttal": false
+			},
+			{
+				"cause": "AIが店舗情報から自動でWebサイトやSNS投稿を生成するSaaSを提供する",
+				"effect": "オーナーは本来の調理・接客業務に集中できる",
+				"is_rebuttal": false
+			},
+			{
+				"cause": "AIが店舗情報から自動でWebサイトやSNS投稿を生成するSaaSを提供する",
+				"effect": "オンラインでの認知度が向上し、新規顧客の来店が増加する",
+				"is_rebuttal": false
+			}
+		]
+	}`
+
+	// APIにPOSTリクエストを送信
+	res, err := http.Post(testServer.URL, "application/json", bytes.NewBufferString(requestJSON))
+	require.NoError(t, err, "HTTPリクエストの送信に失敗しました。")
+	defer res.Body.Close()
+
+	// --- 3. レスポンスの検証 ---
+
+	assert.Equal(t, http.StatusOK, res.StatusCode, "期待されるHTTPステータスコードは200 OKです。")
+	assert.Equal(t, "application/json; charset=utf-8", res.Header.Get("Content-Type"), "Content-Typeヘッダーが正しくありません。")
+
+	responseBodyBytes, err := io.ReadAll(res.Body)
+	require.NoError(t, err, "レスポンスボディの読み込みに失敗しました。")
+
+	// レスポンスの生JSONをログに出力
+	t.Logf("Raw JSON Response Body:\n%s", string(responseBodyBytes))
+
+	// レスポンスJSONをマップにデコードして構造を検証
+	var updatedGraphData map[string]interface{}
+	err = json.Unmarshal(responseBodyBytes, &updatedGraphData)
+	require.NoError(t, err, "レスポンスボディのJSONデコードに失敗しました。")
 }

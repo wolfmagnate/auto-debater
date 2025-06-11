@@ -12,7 +12,7 @@ type DebateGraphNodeRebuttal struct {
 // エッジに対する反論
 type DebateGraphEdgeRebuttal struct {
 	TargetEdge   *DebateGraphEdge // どのエッジに反論するか
-	RebuttalType string           // "certainty"または"rebuttal"
+	RebuttalType string           // "certainty"または"uniqueness"
 	RebuttalNode *DebateGraphNode // 反論を行うノード
 }
 

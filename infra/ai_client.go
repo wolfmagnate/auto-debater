@@ -41,6 +41,11 @@ func ChatCompletionHandler[T any](ctx context.Context, prompt string, thinkingBu
 	config := &genai.GenerateContentConfig{
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   responseSchema,
+		// Tools: []*genai.Tool{
+		//	{
+		//		GoogleSearch: &genai.GoogleSearch{},
+		//	},
+		//},
 	}
 
 	if thinkingBudget != nil {
