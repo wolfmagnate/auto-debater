@@ -21,16 +21,16 @@ paths:
       summary: Generate rebuttals for a subgraph
       description: |-
         Receives a main debate graph (for context) and a target subgraph. 
-        It generates PMF and Evidence-based rebuttals for the subgraph, then returns the modified subgraph.
+        It generates PMF and Evidence-based rebuttals for the subgraph, then returns a list of proposed rebuttals.
       requestBody:
         $ref: '#/components/requestBodies/CreateRebuttalRequest'
       responses:
         '200':
-          description: Successfully generated rebuttals and returned the updated subgraph.
+          description: Successfully generated a list of proposed rebuttals.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DebateGraph'
+                $ref: '#/components/schemas/CreateRebuttalResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '405':
@@ -160,6 +160,19 @@ components:
   # --- Data Schemas ---
   schemas:
     # --- Response Body Schemas ---
+    CreateRebuttalResult:
+      type: object
+      description: A list of proposed rebuttals for nodes and edges.
+      properties:
+        node_rebuttals:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeRebuttalResult'
+        edge_rebuttals:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeRebuttalResult'
+            
     TODOSuggestions:
       type: object
       properties:
@@ -168,7 +181,33 @@ components:
           items:
             $ref: '#/components/schemas/EnhancementTODO'
 
-    # --- Core Action/TODO Schemas ---
+    # --- Core Action/TODO/Rebuttal Schemas ---
+    NodeRebuttalResult:
+      type: object
+      description: A proposed rebuttal against a single node.
+      properties:
+        target_argument:
+          type: string
+        rebuttal_type:
+          type: string
+        rebuttal_argument:
+          type: string
+      required: [target_argument, rebuttal_type, rebuttal_argument]
+
+    EdgeRebuttalResult:
+      type: object
+      description: A proposed rebuttal against a single edge.
+      properties:
+        target_cause_argument:
+          type: string
+        target_effect_argument:
+          type: string
+        rebuttal_type:
+          type: string
+        rebuttal_argument:
+          type: string
+      required: [target_cause_argument, target_effect_argument, rebuttal_type, rebuttal_argument]
+
     EnhancementAction:
       type: object
       description: A single concrete action to enhance logic. Exactly one property should be present.

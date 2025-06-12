@@ -13,6 +13,26 @@ type RebuttalCreator struct {
 	pmfRebuttalFinder      *PMFRebuttalFinder
 }
 
+type NodeRebuttalResult struct {
+	TargetArgument   string `json:"target_argument"`
+	RebuttalType     string `json:"rebuttal_type"`
+	RebuttalArgument string `json:"rebuttal_argument"`
+}
+
+// EdgeRebuttalResult は、エッジへの反論提案を文字列ベースで保持します。
+type EdgeRebuttalResult struct {
+	TargetCauseArgument  string `json:"target_cause_argument"`
+	TargetEffectArgument string `json:"target_effect_argument"`
+	RebuttalType         string `json:"rebuttal_type"`
+	RebuttalArgument     string `json:"rebuttal_argument"`
+}
+
+// CreateRebuttalResult は、生成された全ての反論提案を保持するトップレベルの構造体です。
+type CreateRebuttalResult struct {
+	NodeRebuttals []NodeRebuttalResult `json:"node_rebuttals"`
+	EdgeRebuttals []EdgeRebuttalResult `json:"edge_rebuttals"`
+}
+
 func NewRebuttalCreator() (*RebuttalCreator, error) {
 	finder, err := CreateEvidenceRebuttalFinder()
 	if err != nil {
@@ -30,135 +50,79 @@ func NewRebuttalCreator() (*RebuttalCreator, error) {
 	}, nil
 }
 
+// CreateRebuttal は、subGraphに対する反論を生成し、その結果を構造体で返します。
+// グラフ自体は変更しません。
 func (creator *RebuttalCreator) CreateRebuttal(
 	ctx context.Context,
-	debateGraph *domain.DebateGraph, // コンテキストとして使用
-	subGraph *domain.DebateGraph, // 反論の生成と保存の対象
-) {
+	debateGraph *domain.DebateGraph,
+	subGraph *domain.DebateGraph,
+) (*CreateRebuttalResult, error) {
+	result := &CreateRebuttalResult{
+		NodeRebuttals: make([]NodeRebuttalResult, 0),
+		EdgeRebuttals: make([]EdgeRebuttalResult, 0),
+	}
 	// --- ステップ1: subGraphの全てのエッジに対して証拠に基づく反論を生成 ---
 	log.Println("--- Starting Evidence Rebuttal Creation for subGraph edges ---")
 	subGraphEdges := subGraph.GetAllEdges()
 
-	if len(subGraphEdges) == 0 {
-		log.Println("No edges found in the subGraph. Nothing to rebut.")
-		log.Println("--- Finished Evidence Rebuttal Creation for subGraph edges ---")
-		return
-	}
-
-	log.Printf("Found %d edges in subGraph to analyze for rebuttals.", len(subGraphEdges))
-	fmt.Println()
-
-	for i, edge := range subGraphEdges {
-		log.Printf("Analyzing subGraph edge %d/%d: [%s] -> [%s]", i+1, len(subGraphEdges), edge.Cause.Argument, edge.Effect.Argument)
-
-		// 全体のdebateGraphをコンテキストとして渡し、subGraphのedgeを対象に反論を探す
-		evidenceRebuttals, err := creator.evidenceRebuttalFinder.FindeEvidenceRebuttalFinder(
-			ctx,
-			debateGraph, // Full graph for context
-			edge.Cause,
-			edge.Effect,
-			edge,
-		)
-		if err != nil {
-			log.Printf("ERROR: Could not find evidence rebuttals for edge [%s] -> [%s]: %v", edge.Cause.Argument, edge.Effect.Argument, err)
-			continue
-		}
-
-		if evidenceRebuttals != nil && len(evidenceRebuttals.Rebuttals) > 0 {
-			log.Printf("SUCCESS: Found %d rebuttal(s) for edge [%s] -> [%s]. Adding them to the subGraph.", len(evidenceRebuttals.Rebuttals), edge.Cause.Argument, edge.Effect.Argument)
-
-			for _, rebuttal := range evidenceRebuttals.Rebuttals {
-				rebuttalArgument := rebuttal.Rebuttal
-
-				// 2a. 反論ノードをsubGraph内で作成または取得
-				rebuttalNode, exists := subGraph.GetNode(rebuttalArgument)
-				if !exists {
-					log.Printf("  - Creating new rebuttal node in subGraph: [%s]", rebuttalArgument)
-					rebuttalNode = domain.NewDebateGraphNode(rebuttalArgument, true)
-					if err := subGraph.AddNode(rebuttalNode); err != nil {
-						log.Printf("ERROR: Failed to add new rebuttal node to subGraph: %v", err)
-						continue
-					}
-				} else {
-					log.Printf("  - Using existing rebuttal node in subGraph: [%s]", rebuttalArgument)
-				}
-
-				// 2b. EdgeRebuttalを作成し、subGraphに追加
-				newEdgeRebuttal := &domain.DebateGraphEdgeRebuttal{
-					TargetEdge:   edge,
-					RebuttalType: rebuttal.RebuttalType,
-					RebuttalNode: rebuttalNode,
-				}
-				subGraph.EdgeRebuttals = append(subGraph.EdgeRebuttals, newEdgeRebuttal)
-
-				log.Printf("  - Added EdgeRebuttal to subGraph: Attacks edge [%s] -> [%s] with node [%s] (type: %s)",
-					edge.Cause.Argument,
-					edge.Effect.Argument,
-					rebuttalNode.Argument,
-					rebuttal.RebuttalType)
+	if len(subGraphEdges) > 0 {
+		// ... (ログ出力部分は変更なし) ...
+		for _, edge := range subGraphEdges {
+			evidenceRebuttals, err := creator.evidenceRebuttalFinder.FindeEvidenceRebuttalFinder(ctx, debateGraph, edge.Cause, edge.Effect, edge)
+			if err != nil {
+				log.Printf("ERROR: Could not find evidence rebuttals for edge [%s] -> [%s]: %v", edge.Cause.Argument, edge.Effect.Argument, err)
+				continue
 			}
-		} else {
-			log.Printf("INFO: No rebuttals found for edge [%s] -> [%s].", edge.Cause.Argument, edge.Effect.Argument)
-		}
-		fmt.Println()
-	}
 
+			if evidenceRebuttals != nil && len(evidenceRebuttals.Rebuttals) > 0 {
+				log.Printf("SUCCESS: Found %d rebuttal(s) for edge [%s] -> [%s].", len(evidenceRebuttals.Rebuttals), edge.Cause.Argument, edge.Effect.Argument)
+				for _, rebuttal := range evidenceRebuttals.Rebuttals {
+					edgeResult := EdgeRebuttalResult{
+						TargetCauseArgument:  edge.Cause.Argument,
+						TargetEffectArgument: edge.Effect.Argument,
+						RebuttalType:         rebuttal.RebuttalType,
+						RebuttalArgument:     rebuttal.Rebuttal,
+					}
+					result.EdgeRebuttals = append(result.EdgeRebuttals, edgeResult)
+					log.Printf("  - Proposing EdgeRebuttal for edge [%s] -> [%s] with argument [%s]", edge.Cause.Argument, edge.Effect.Argument, rebuttal.Rebuttal)
+				}
+			}
+		}
+	}
 	log.Println("--- Finished Evidence Rebuttal Creation for subGraph edges ---")
 
 	// --- ステップ2: subGraphに対するPMFの反論を生成 ---
 	log.Println("--- Starting PMF Rebuttal Creation for subGraph ---")
-
 	pmfRebuttals, err := creator.pmfRebuttalFinder.FindPMFRebuttal(ctx, debateGraph, subGraph)
 	if err != nil {
-		log.Printf("ERROR: Could not find PMF rebuttals for the subGraph: %v", err)
+		return nil, fmt.Errorf("could not find PMF rebuttals for the subGraph: %w", err)
 	}
 
 	if pmfRebuttals != nil {
 		allPMFRebuttals := append(pmfRebuttals.StatusQuo, pmfRebuttals.AffirmativePlan...)
-
 		if len(allPMFRebuttals) > 0 {
-			log.Printf("SUCCESS: Found %d PMF rebuttal(s) for the subGraph. Adding them to the subGraph.", len(allPMFRebuttals))
-			fmt.Println()
-
+			log.Printf("SUCCESS: Found %d PMF rebuttal(s) for the subGraph.", len(allPMFRebuttals))
+			// ...
 			for _, pmfRebuttal := range allPMFRebuttals {
 				rebuttalArgument := pmfRebuttal.Rebuttal
-
-				// 1a. 反論ノードをsubGraph内で作成または取得
-				rebuttalNode, exists := subGraph.GetNode(rebuttalArgument)
-				if !exists {
-					log.Printf("  - Creating new PMF rebuttal node in subGraph: [%s]", rebuttalArgument)
-					rebuttalNode = domain.NewDebateGraphNode(rebuttalArgument, true)
-					if err := subGraph.AddNode(rebuttalNode); err != nil {
-						log.Printf("ERROR: Failed to add new PMF rebuttal node to subGraph: %v", err)
-						continue
-					}
-				} else {
-					log.Printf("  - Using existing PMF rebuttal node in subGraph: [%s]", rebuttalArgument)
-				}
-
-				// 1b. ターゲットノードをsubGraphから取得
+				// ターゲットノードの存在確認
 				targetNode, exists := subGraph.GetNode(pmfRebuttal.TargetArgument)
 				if !exists {
-					log.Printf("WARN: Target node '%s' for PMF rebuttal not found in subGraph. Skipping NodeRebuttal creation.", pmfRebuttal.TargetArgument)
+					log.Printf("WARN: Target node '%s' for PMF rebuttal not found in subGraph. Skipping.", pmfRebuttal.TargetArgument)
 					continue
 				}
 
-				// 1c. NodeRebuttalを作成し、subGraphに追加
-				nodeRebuttal := &domain.DebateGraphNodeRebuttal{
-					TargetNode:   targetNode,
-					RebuttalType: "importance", // PMFの指摘は、その主張の重要性に対する反論と定義
-					RebuttalNode: rebuttalNode,
+				nodeResult := NodeRebuttalResult{
+					TargetArgument:   targetNode.Argument,
+					RebuttalType:     "importance",
+					RebuttalArgument: rebuttalArgument,
 				}
-				subGraph.NodeRebuttals = append(subGraph.NodeRebuttals, nodeRebuttal)
-
-				log.Printf("  - Added NodeRebuttal to subGraph: Attacks node [%s]'s importance with node [%s]",
-					targetNode.Argument,
-					rebuttalNode.Argument)
+				result.NodeRebuttals = append(result.NodeRebuttals, nodeResult)
+				log.Printf("  - Proposing NodeRebuttal for node [%s] with argument [%s]", targetNode.Argument, rebuttalArgument)
 			}
-		} else {
-			log.Println("INFO: No PMF rebuttals were found for the current subGraph.")
 		}
 	}
-	fmt.Println()
 	log.Println("--- Finished PMF Rebuttal Creation for subGraph ---")
+
+	return result, nil
 }

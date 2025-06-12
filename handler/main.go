@@ -34,16 +34,14 @@ type CreateRebuttalRequest struct {
 	SubgraphJSON    json.RawMessage `json:"subgraph"`
 }
 
-// CreateRebuttalEndpoint は、JSONでDebateGraphとsubGraphを受け取り、
-// subGraphに反論を追加して、更新されたsubGraphを返すHTTPハンドラです。
 func (h *Handler) CreateRebuttalEndpoint(w http.ResponseWriter, r *http.Request) {
-	// 1. HTTPメソッドがPOSTであることを確認します。
+	// 1. HTTPメソッドがPOSTであることを確認
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 2. リクエストボディからJSONデータを読み込みます。
+	// 2. リクエストボディを読み込み
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("ERROR: Could not read request body: %v", err)
@@ -52,7 +50,7 @@ func (h *Handler) CreateRebuttalEndpoint(w http.ResponseWriter, r *http.Request)
 	}
 	defer r.Body.Close()
 
-	// 3. リクエストJSONをデコードします。
+	// 3. リクエストJSONをデコード
 	var req CreateRebuttalRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Printf("ERROR: Could not unmarshal request JSON: %v", err)
@@ -60,13 +58,13 @@ func (h *Handler) CreateRebuttalEndpoint(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 必須フィールドの存在を検証します。
+	// 必須フィールドの存在を検証
 	if len(req.DebateGraphJSON) == 0 || len(req.SubgraphJSON) == 0 {
 		http.Error(w, "Bad request: 'debate_graph' and 'subgraph' fields are required", http.StatusBadRequest)
 		return
 	}
 
-	// 4. JSONから内部のDebateGraphオブジェクトに組み立てます。
+	// 4. JSONからDebateGraphオブジェクトを構築
 	debateGraph, err := domain.NewDebateGraphFromJSON(string(req.DebateGraphJSON))
 	if err != nil {
 		log.Printf("ERROR: Could not create main graph from JSON: %v", err)
@@ -83,27 +81,32 @@ func (h *Handler) CreateRebuttalEndpoint(w http.ResponseWriter, r *http.Request)
 
 	log.Println("INFO: Successfully created graphs from JSON. Starting rebuttal creation for subgraph...")
 
-	// 5. RebuttalCreatorを使って、subGraphに反論を追加する処理を実行します。
-	h.RebuttalCreator.CreateRebuttal(r.Context(), debateGraph, subGraph)
-
-	log.Println("INFO: Rebuttal creation finished. Converting updated subgraph to JSON...")
-
-	// 6. 更新されたsubGraphをJSONに変換します。
-	updatedSubgraphJSON, err := subGraph.ToJSON()
+	// 5. RebuttalCreatorを呼び出し、反論の提案結果を受け取ります。
+	rebuttalResult, err := h.RebuttalCreator.CreateRebuttal(r.Context(), debateGraph, subGraph)
 	if err != nil {
-		log.Printf("ERROR: Could not convert updated subgraph to JSON: %v", err)
-		http.Error(w, "Internal server error while processing the graph", http.StatusInternalServerError)
+		log.Printf("ERROR: Rebuttal creation process failed: %v", err)
+		http.Error(w, "Internal server error during rebuttal creation", http.StatusInternalServerError)
 		return
 	}
 
-	// 7. 成功したレスポンスとして、更新後のsubGraphのJSONを返します。
+	log.Printf("INFO: Rebuttal creation finished. Found %d node rebuttals and %d edge rebuttals.", len(rebuttalResult.NodeRebuttals), len(rebuttalResult.EdgeRebuttals))
+
+	// 6. 受け取った結果構造体をJSONに変換します。
+	responseJSON, err := json.Marshal(rebuttalResult)
+	if err != nil {
+		log.Printf("ERROR: Could not marshal rebuttal result to JSON: %v", err)
+		http.Error(w, "Internal server error while formatting response", http.StatusInternalServerError)
+		return
+	}
+
+	// 7. 成功したレスポンスとして、反論提案のJSONを返します。
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte(updatedSubgraphJSON)); err != nil {
+	if _, err := w.Write(responseJSON); err != nil {
 		log.Printf("ERROR: Could not write response: %v", err)
 	}
 
-	log.Println("INFO: Successfully sent updated subgraph as response.")
+	log.Println("INFO: Successfully sent rebuttal results as response.")
 }
 
 type EnhanceLogicRequest struct {
