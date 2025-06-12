@@ -41,12 +41,18 @@ func main() {
 		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
 	}
 
+	todoEnhancer, err := logic_composer.CreateTODOEnhancer()
+	if err != nil {
+		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
+	}
+
 	// 2. ハンドラを初期化 (両方の依存を注入)
-	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer)
+	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer, todoEnhancer)
 
 	// 3. エンドポイントを登録
 	http.Handle("/api/create-rebuttal", corsMiddleware(http.HandlerFunc(apiHandler.CreateRebuttalEndpoint)))
 	http.Handle("/api/enhance-logic", corsMiddleware(http.HandlerFunc(apiHandler.EnhanceLogicEndpoint)))
+	http.Handle("/api/enhance-todo", corsMiddleware(http.HandlerFunc(apiHandler.EnhanceTODOEndpoint)))
 
 	// 4. サーバーを起動
 	port := ":8080"

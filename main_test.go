@@ -69,8 +69,13 @@ func TestEnhanceLogicEndpoint_Integration(t *testing.T) {
 		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
 	}
 
+	todoEnhancer, err := logic_composer.CreateTODOEnhancer()
+	if err != nil {
+		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
+	}
+
 	// テスト対象のハンドラとテストサーバーをセットアップ
-	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer)
+	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer, todoEnhancer)
 	testServer := httptest.NewServer(http.HandlerFunc(apiHandler.EnhanceLogicEndpoint))
 	defer testServer.Close()
 
@@ -161,8 +166,13 @@ func TestCreateRebuttalEndpoint_Integration(t *testing.T) {
 		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
 	}
 
+	todoEnhancer, err := logic_composer.CreateTODOEnhancer()
+	if err != nil {
+		log.Fatalf("FATAL: Failed to create logic enhancer: %v", err)
+	}
+
 	// テスト対象のハンドラとテストサーバーをセットアップ
-	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer)
+	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer, todoEnhancer)
 	testServer := httptest.NewServer(http.HandlerFunc(apiHandler.CreateRebuttalEndpoint))
 	defer testServer.Close()
 
