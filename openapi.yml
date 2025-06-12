@@ -1,71 +1,56 @@
 openapi: 3.0.3
 info:
   title: Auto Debater API
-  description: |-
-    議論グラフ（DebateGraph）を自動的に分析・強化するためのAPI。
-    - 議論に対する反論を総合的に生成するエンドポイント
-    - 因果関係の論理を強化するエンドポイント
-    を提供します。
-  version: 1.1.0
+  description: API for generating rebuttals, enhancing logical structures, and proposing improvements for debate graphs.
+  version: 1.0.0
 servers:
   - url: http://localhost:8080
-    description: ローカル開発環境サーバー
+    description: Local development server
+
+tags:
+  - name: Rebuttal Creation
+    description: Endpoints for generating rebuttals against nodes and edges.
+  - name: Logic Composition
+    description: Endpoints for analyzing and strengthening logical structures.
 
 paths:
   /api/create-rebuttal:
     post:
-      summary: 議論グラフに反論を総合的に追加
+      tags:
+        - Rebuttal Creation
+      summary: Generate rebuttals for a subgraph
       description: |-
-        与えられた議論グラフ（DebateGraph）全体を分析し、以下の2種類の反論を自動で生成・追加します。
-        1.  **証拠ベースの反論 (Evidence Rebuttal):** 各因果関係（エッジ）の確実性や独自性に対する反論を生成します。結果は `edge_rebuttals` に追加されます。
-        2.  **PMFベースの反論 (PMF Rebuttal):** 事業計画のPMF（プロダクトマーケットフィット）の観点から、各主張（ノード）の重要性に対する反論を生成します。結果は `node_rebuttals` に追加されます。
-
-        更新された完全な議論グラフを返します。
-      operationId: createRebuttal
+        Receives a main debate graph (for context) and a target subgraph. 
+        It generates PMF and Evidence-based rebuttals for the subgraph, then returns the modified subgraph.
       requestBody:
-        description: 反論を追加する対象の議論グラフ。
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DebateGraph'
+        $ref: '#/components/requestBodies/CreateRebuttalRequest'
       responses:
         '200':
-          description: 反論の追加に成功し、更新された議論グラフを返却。
+          description: Successfully generated rebuttals and returned the updated subgraph.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DebateGraph'
         '400':
-          description: リクエストボディのJSON形式が不正、または構造に問題がある場合。
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '500':
-          description: サーバー内部での処理（反論生成、JSON変換など）に失敗した場合。
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/InternalServerError'
 
   /api/enhance-logic:
     post:
-      summary: 特定の因果関係の論理を強化
+      tags:
+        - Logic Composition
+      summary: Propose actions to enhance a causal link
       description: |-
-        与えられた議論グラフと、その中の特定の因果関係（causeとeffectで指定）を基に、その論理を強化するための一連の操作案（アクション）を生成して返します。
-        このエンドポイントはグラフ自体を更新せず、どのような更新が可能かを提案します。
-      operationId: enhanceLogic
+        Receives a debate graph and a specific cause-and-effect pair.
+        It proposes a list of concrete actions (e.g., inserting an intermediate node, strengthening an edge) to make the causal link more robust.
       requestBody:
-        description: 全体の議論グラフと、強化対象の因果関係を指定します。
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EnhanceLogicRequest'
+        $ref: '#/components/requestBodies/EnhanceLogicRequest'
       responses:
         '200':
-          description: 成功。生成された論理強化アクションの配列を返却。
+          description: Successfully generated a list of enhancement actions.
           content:
             application/json:
               schema:
@@ -73,130 +58,166 @@ paths:
                 items:
                   $ref: '#/components/schemas/EnhancementAction'
         '400':
-          description: |-
-            リクエストボディのJSON形式が不正、必須フィールドが欠落している、
-            または指定された 'cause'/'effect' ノードがグラフ内に存在しない場合。
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '500':
-          description: サーバー内部での処理（ロジック強化）に失敗した場合。
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/enhance-todo:
+    post:
+      tags:
+        - Logic Composition
+      summary: Propose a TODO list to improve a subgraph
+      description: |-
+        Receives a main debate graph (for context) and a target subgraph. 
+        It analyzes the subgraph and proposes a list of TODOs (actions) to strengthen its internal logic and arguments.
+      requestBody:
+        $ref: '#/components/requestBodies/EnhanceTODORequest'
+      responses:
+        '200':
+          description: Successfully generated a list of TODO suggestions.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/TODOSuggestions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
+  # --- Reusable Request Bodies ---
+  requestBodies:
+    CreateRebuttalRequest:
+      required: true
+      description: The main graph for context and the subgraph to generate rebuttals for.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              debate_graph:
+                $ref: '#/components/schemas/DebateGraph'
+              subgraph:
+                $ref: '#/components/schemas/DebateGraph'
+            required:
+              - debate_graph
+              - subgraph
+    EnhanceLogicRequest:
+      required: true
+      description: The main graph and the specific cause/effect arguments to enhance.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              debate_graph:
+                $ref: '#/components/schemas/DebateGraph'
+              cause:
+                type: string
+              effect:
+                type: string
+            required:
+              - debate_graph
+              - cause
+              - effect
+    EnhanceTODORequest:
+      required: true
+      description: The main graph for context and the subgraph to get TODOs for.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              debate_graph:
+                $ref: '#/components/schemas/DebateGraph'
+              subgraph:
+                $ref: '#/components/schemas/DebateGraph'
+            required:
+              - debate_graph
+              - subgraph
+
+  # --- Reusable Responses ---
+  responses:
+    BadRequest:
+      description: Bad Request. The request body is malformed, or required fields are missing.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    MethodNotAllowed:
+      description: Method Not Allowed. The endpoint only supports the POST method.
+    InternalServerError:
+      description: Internal Server Error. An error occurred on the server side.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  # --- Data Schemas ---
   schemas:
-    # -----------------------------------------------
-    # DebateGraph関連の共通スキーマ
-    # -----------------------------------------------
-    DebateGraphNode:
+    # --- Response Body Schemas ---
+    TODOSuggestions:
       type: object
-      description: 議論グラフを構成する単一の主張（ノード）。
-      required:
-        - argument
-        - is_rebuttal
       properties:
-        argument:
-          type: string
-          description: 主張の内容。
-          example: '再生可能エネルギーの導入が増加する'
-        is_rebuttal:
-          type: boolean
-          description: このノードが反論であるかを示すフラグ。
-        importance:
+        todo:
           type: array
           items:
-            type: string
-          description: この主張の重要性を裏付ける証拠や理由。
-        uniqueness:
-          type: array
-          items:
-            type: string
-          description: この主張の独自性（他では解決されないなど）を裏付ける証拠や理由。
-        importance_rebuttals:
-          type: array
-          items:
-            type: string
-          description: 重要性に対する反論。
-        uniqueness_rebuttals:
-          type: array
-          items:
-            type: string
-          description: 独自性に対する反論。
-    DebateGraphEdge:
+            $ref: '#/components/schemas/EnhancementTODO'
+
+    # --- Core Action/TODO Schemas ---
+    EnhancementAction:
       type: object
-      description: 二つのノード間の因果関係（エッジ）。
-      required:
-        - cause
-        - effect
-        - is_rebuttal
+      description: A single concrete action to enhance logic. Exactly one property should be present.
       properties:
-        cause:
-          type: string
-          description: 原因となるノードのargument。
-          example: '再生可能エネルギーの導入が増加する'
-        effect:
-          type: string
-          description: 結果となるノードのargument。
-          example: 'CO2排出量が削減される'
-        is_rebuttal:
-          type: boolean
-          description: このエッジが反論の一部であるかを示すフラグ。
-        certainty:
-          type: array
-          items:
-            type: string
-          description: この因果関係の確実性を裏付ける証拠や理由。
-        uniqueness:
-          type: array
-          items:
-            type: string
-          description: この原因がこの結果を引き起こす独自性（他の原因ではないこと）を裏付ける証拠や理由。
-        certainty_rebuttal:
-          type: array
-          items:
-            type: string
-          description: 確実性に対する反論。
-        uniqueness_rebuttals:
-          type: array
-          items:
-            type: string
-          description: 独自性に対する反論。
-    DebateGraphNodeRebuttal:
+        strengthen_edge:
+          $ref: '#/components/schemas/StrengthenEdgePayload'
+        insert_node:
+          $ref: '#/components/schemas/InsertNodePayload'
+    
+    EnhancementTODO:
       type: object
-      description: 特定のノードに対する反論の関連付け。
+      description: A single suggested action (TODO). Exactly one property should be present.
+      properties:
+        strengthen_edge:
+          $ref: '#/components/schemas/StrengthenEdgePayload'
+        strengthen_node:
+          $ref: '#/components/schemas/StrengthenNodePayload'
+        insert_node:
+          $ref: '#/components/schemas/InsertNodePayload'
+
+    # --- Payload Schemas ---
+    StrengthenEdgePayload:
+      type: object
+      properties:
+        cause_argument: { type: string }
+        effect_argument: { type: string }
+        enhancement_type: { type: string, enum: [uniqueness, certainty] }
+        content: { type: string }
+      required: [cause_argument, effect_argument, enhancement_type, content]
+
+    StrengthenNodePayload:
+      type: object
       properties:
         target_argument: { type: string }
-        rebuttal_type: { type: string, enum: [importance, uniqueness] }
-        rebuttal_argument: { type: string }
-    DebateGraphEdgeRebuttal:
+        content: { type: string }
+      required: [target_argument, content]
+
+    InsertNodePayload:
       type: object
-      description: 特定のエッジに対する反論の関連付け。
       properties:
-        target_cause_argument: { type: string }
-        target_effect_argument: { type: string }
-        rebuttal_type: { type: string, enum: [certainty, uniqueness] }
-        rebuttal_argument: { type: string }
-    CounterArgumentRebuttal:
-      type: object
-      description: ある主張に対する直接的な反対意見。
-      properties:
-        rebuttal_argument: { type: string }
-        target_argument: { type: string }
-    TurnArgumentRebuttal:
-      type: object
-      description: 主張を逆手に取るターンアラウンド。
-      properties:
-        rebuttal_argument: { type: string }
+        cause_argument: { type: string }
+        effect_argument: { type: string }
+        intermediate_argument: { type: string }
+      required: [cause_argument, effect_argument, intermediate_argument]
+
+    # --- Debate Graph Structure Schemas ---
     DebateGraph:
       type: object
-      description: 議論の全体構造を表すグラフ。
-      required:
-        - nodes
-        - edges
+      description: Represents the entire structure of a debate.
       properties:
         nodes:
           type: array
@@ -209,11 +230,11 @@ components:
         node_rebuttals:
           type: array
           items:
-            $ref: '#/components/schemas/DebateGraphNodeRebuttal'
+            $ref: '#/components/schemas/NodeRebuttal'
         edge_rebuttals:
           type: array
           items:
-            $ref: '#/components/schemas/DebateGraphEdgeRebuttal'
+            $ref: '#/components/schemas/EdgeRebuttal'
         counter_argument_rebuttals:
           type: array
           items:
@@ -222,103 +243,65 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TurnArgumentRebuttal'
+      required: [nodes, edges]
 
-    # -----------------------------------------------
-    # enhance-logic関連のスキーマ
-    # -----------------------------------------------
-    EnhanceLogicRequest:
+    DebateGraphNode:
       type: object
-      description: ロジック強化APIへのリクエストボディ。
-      required:
-        - debate_graph
-        - cause
-        - effect
       properties:
-        debate_graph:
-          $ref: '#/components/schemas/DebateGraph'
-        cause:
-          type: string
-          description: 強化対象の因果関係の「原因」となるノードのargument。
-          example: '再生可能エネルギーの導入が増加する'
-        effect:
-          type: string
-          description: 強化対象の因果関係の「結果」となるノードのargument。
-          example: 'CO2排出量が削減される'
-    EnhancementAction:
+        argument: { type: string }
+        is_rebuttal: { type: boolean }
+        importance: { type: array, items: { type: string } }
+        uniqueness: { type: array, items: { type: string } }
+        importance_rebuttals: { type: array, items: { type: string } }
+        uniqueness_rebuttals: { type: array, items: { type: string } }
+      required: [argument, is_rebuttal]
+
+    DebateGraphEdge:
       type: object
-      description: |-
-        AIによって提案された単一のロジック強化アクション。
-        3種類のペイロードのうち、必ず1つだけが含まれます。
       properties:
-        strengthen_node_uniqueness:
-          $ref: '#/components/schemas/StrengthenNodeUniquenessPayload'
-        strengthen_edge:
-          $ref: '#/components/schemas/StrengthenEdgePayload'
-        insert_node:
-          $ref: '#/components/schemas/InsertNodePayload'
-    StrengthenNodeUniquenessPayload:
+        cause: { type: string }
+        effect: { type: string }
+        is_rebuttal: { type: boolean }
+        certainty: { type: array, items: { type: string } }
+        uniqueness: { type: array, items: { type: string } }
+        certainty_rebuttal: { type: array, items: { type: string } }
+        uniqueness_rebuttals: { type: array, items: { type: string } }
+      required: [cause, effect, is_rebuttal]
+
+    NodeRebuttal:
       type: object
-      description: 既存ノードの独自性（Uniqueness）を強化するアクション。
-      required:
-        - target_argument
-        - content
       properties:
-        target_argument:
-          type: string
-          description: 強化対象となるノードのargument。
-        content:
-          type: string
-          description: 独自性を強化するための具体的な記述内容。
-    StrengthenEdgePayload:
+        target_argument: { type: string }
+        rebuttal_type: { type: string }
+        rebuttal_argument: { type: string }
+      required: [target_argument, rebuttal_type, rebuttal_argument]
+
+    EdgeRebuttal:
       type: object
-      description: 既存エッジの確実性（Certainty）または独自性（Uniqueness）を強化するアクション。
-      required:
-        - cause_argument
-        - effect_argument
-        - enhancement_type
-        - content
       properties:
-        cause_argument:
-          type: string
-          description: 強化対象エッジの原因ノードのargument。
-        effect_argument:
-          type: string
-          description: 強化対象エッジの結果ノードのargument。
-        enhancement_type:
-          type: string
-          description: 強化の種類。
-          enum: [uniqueness, certainty]
-        content:
-          type: string
-          description: 確実性または独自性を強化するための具体的な記述内容。
-    InsertNodePayload:
-      type: object
-      description: 既存エッジの間に新しい中間ノードを挿入するアクション。
-      required:
-        - cause_argument
-        - effect_argument
-        - intermediate_argument
-      properties:
-        cause_argument:
-          type: string
-          description: 元のエッジの原因ノードのargument。
-        effect_argument:
-          type: string
-          description: 元のエッジの結果ノードのargument。
-        intermediate_argument:
-          type: string
-          description: 挿入する新しい中間ノードの主張内容。
+        target_cause_argument: { type: string }
+        target_effect_argument: { type: string }
+        rebuttal_type: { type: string }
+        rebuttal_argument: { type: string }
+      required: [target_cause_argument, target_effect_argument, rebuttal_type, rebuttal_argument]
     
-    # -----------------------------------------------
-    # 共通エラーのスキーマ
-    # -----------------------------------------------
-    Error:
+    CounterArgumentRebuttal:
       type: object
       properties:
-        code:
-          type: integer
-          format: int32
-          description: エラーコード。
-        message:
+        rebuttal_argument: { type: string }
+        target_argument: { type: string }
+      required: [rebuttal_argument, target_argument]
+
+    TurnArgumentRebuttal:
+      type: object
+      properties:
+        rebuttal_argument: { type: string }
+      required: [rebuttal_argument]
+
+    # --- Common Error Schema ---
+    ErrorResponse:
+      type: object
+      properties:
+        error:
           type: string
-          description: エラーメッセージ。
+          example: "Bad request: required fields are missing"

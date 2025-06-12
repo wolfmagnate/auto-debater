@@ -31,6 +31,7 @@ func CreatePMFRebuttalFinder() (*PMFRebuttalFinder, error) {
 
 type FindPMFRebuttalTemplateData struct {
 	DebateGraphJSON string
+	SubGraphJSON    string
 }
 
 // PMFRebuttals は、事業計画のPMFに関する指摘事項を格納します。
@@ -47,15 +48,22 @@ type PMFRebuttal struct {
 
 func (finder *PMFRebuttalFinder) FindPMFRebuttal(
 	ctx context.Context,
-	debateGraph *domain.DebateGraph) (*PMFRebuttals, error) {
+	debateGraph *domain.DebateGraph,
+	subGraph *domain.DebateGraph) (*PMFRebuttals, error) {
 
 	debateGraphJSON, err := debateGraph.ToJSON()
 	if err != nil {
 		return nil, fmt.Errorf("JSONに変換に失敗しました: %w", err)
 	}
 
-	data := FindEvidenceRebuttalTemplateData{
+	subGraphJSON, err := subGraph.ToJSON()
+	if err != nil {
+		return nil, fmt.Errorf("JSONに変換に失敗しました: %w", err)
+	}
+
+	data := FindPMFRebuttalTemplateData{
 		DebateGraphJSON: debateGraphJSON,
+		SubGraphJSON:    subGraphJSON,
 	}
 
 	var processedPrompt bytes.Buffer
