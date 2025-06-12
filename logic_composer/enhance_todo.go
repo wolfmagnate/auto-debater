@@ -39,6 +39,8 @@ type TODOSuggestions struct {
 }
 
 type EnhancementTODO struct {
+	Title string `json:"title"`
+
 	StrengthenEdge *StrengthenEdgePayload `json:"strengthen_edge,omitempty"`
 	StrengthenNode *StrengthenNodePayload `json:"strengthen_node,omitempty"`
 	InsertNode     *InsertNodePayload     `json:"insert_node,omitempty"`

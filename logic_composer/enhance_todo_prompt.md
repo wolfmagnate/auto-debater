@@ -100,6 +100,9 @@ type TODOSuggestions struct {
 }
 
 type EnhancementTODO struct {
+    // 簡潔にこのTODOがどのようなものかを数十文字以内でまとめてタイトルを作ってください
+    Title string `json:"title"`
+
 	StrengthenEdge *StrengthenEdgePayload `json:"strengthen_edge,omitempty"`
     StrengthenNode *StrengthenNodePayload `json:"strengthen_node,omitempty"`
 	InsertNode     *InsertNodePayload     `json:"insert_node,omitempty"`
