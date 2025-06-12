@@ -9,6 +9,26 @@ import (
 	"github.com/wolfmagnate/auto_debater/logic_composer"
 )
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// すべてのオリジンからのリクエストを許可
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// 許可するHTTPメソッド
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		// 許可するヘッダー
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+		// プリフライトリクエストに対応
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// 次のハンドラを実行
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	// 1. 依存関係の初期化
 	rebuttalCreator, err := createrebuttal.NewRebuttalCreator()
@@ -25,8 +45,8 @@ func main() {
 	apiHandler := handler.NewHandler(rebuttalCreator, logicEnhancer)
 
 	// 3. エンドポイントを登録
-	http.HandleFunc("/api/create-rebuttal", apiHandler.CreateRebuttalEndpoint)
-	http.HandleFunc("/api/enhance-logic", apiHandler.EnhanceLogicEndpoint) // 新しいエンドポイント
+	http.Handle("/api/create-rebuttal", corsMiddleware(http.HandlerFunc(apiHandler.CreateRebuttalEndpoint)))
+	http.Handle("/api/enhance-logic", corsMiddleware(http.HandlerFunc(apiHandler.EnhanceLogicEndpoint)))
 
 	// 4. サーバーを起動
 	port := ":8080"
